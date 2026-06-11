@@ -21,6 +21,8 @@ pub struct App {
     pub quit: bool,
     /// Height of the diff body in the last render — needed to clamp scrolling.
     pub viewport_h: usize,
+    /// Horizontal scroll (in columns) of the file tab strip.
+    pub tab_scroll: usize,
 }
 
 impl App {
@@ -43,15 +45,18 @@ impl App {
             view: View::Split,
             quit: false,
             viewport_h: 0,
+            tab_scroll: 0,
         }
+    }
+
+    /// Label shown in the tab strip for a file: ` <status> <path> `.
+    pub fn tab_label(&self, i: usize) -> String {
+        let f = &self.files[i];
+        format!(" {} {} ", f.status, f.path)
     }
 
     pub fn rows(&self) -> &[Row] {
         &self.rows[self.cur]
-    }
-
-    pub fn current(&self) -> &FileDiff {
-        &self.files[self.cur]
     }
 
     /// True when the current file has no actual changes.

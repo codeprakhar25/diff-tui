@@ -42,6 +42,11 @@ fn snapshot(app: &mut App, spec: &str) -> Result<()> {
         .split_once('x')
         .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))
         .unwrap_or((100u16, 24u16));
+    if let Ok(n) = std::env::var("GITUI_CUR") {
+        for _ in 0..n.parse().unwrap_or(0) {
+            app.next_file();
+        }
+    }
     let backend = ratatui::backend::TestBackend::new(w, h);
     let mut term = ratatui::Terminal::new(backend)?;
     term.draw(|f| ui::render(f, app))?;

@@ -23,7 +23,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     ])
     .split(f.area());
 
-    render_header(f, chunks[0], app);
+    render_tabs(f, chunks[0], app);
     app.viewport_h = chunks[1].height as usize;
 
     if app.current_unchanged() {
@@ -38,31 +38,64 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_status(f, chunks[2], app);
 }
 
-fn render_header(f: &mut Frame, area: Rect, app: &App) {
-    let cur = app.current();
-    let pos = format!("[{}/{}]", app.cur + 1, app.files.len());
-    let line = Line::from(vec![
-        Span::styled(
-            format!(" {} ", cur.path),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!("({}) ", cur.status), status_style(cur.status)),
-        Span::styled(pos, Style::default().fg(Color::DarkGray)),
-    ]);
+/// Horizontal file tab strip. Tabs are status-colored; the active one is
+/// highlighted. When tabs overflow the width, the strip scrolls to keep the
+/// active tab in view.
+fn render_tabs(f: &mut Frame, area: Rect, app: &mut App) {
+    let area_w = area.width as usize;
+
+    // Lay out tab start columns + widths, then nudge tab_scroll so the active
+    // tab is fully visible.
+    let widths: Vec<usize> = (0..app.files.len())
+        .map(|i| app.tab_label(i).chars().count())
+        .collect();
+    let starts: Vec<usize> = widths
+        .iter()
+        .scan(0, |acc, &w| {
+            let s = *acc;
+            *acc += w;
+            Some(s)
+        })
+        .collect();
+    let a_start = starts[app.cur];
+    let a_end = a_start + widths[app.cur];
+    if a_start < app.tab_scroll {
+        app.tab_scroll = a_start;
+    } else if a_end > app.tab_scroll + area_w {
+        app.tab_scroll = a_end.saturating_sub(area_w);
+    }
+
+    let mut spans = Vec::with_capacity(app.files.len());
+    for i in 0..app.files.len() {
+        let label = app.tab_label(i);
+        let style = if i == app.cur {
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Rgb(55, 55, 70))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            status_style(app.files[i].status).bg(Color::Rgb(28, 28, 34))
+        };
+        spans.push(Span::styled(label, style));
+    }
+
     f.render_widget(
-        Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 35))),
+        Paragraph::new(Line::from(spans))
+            .scroll((0, app.tab_scroll as u16))
+            .style(Style::default().bg(Color::Rgb(28, 28, 34))),
         area,
     );
 }
 
-fn render_status(f: &mut Frame, area: Rect, _app: &App) {
-    let help = " q quit   j/k scroll   h/l ←→   n/p file   g/G top/bot   u view ";
+fn render_status(f: &mut Frame, area: Rect, app: &App) {
+    let pos = format!(" [{}/{}] ", app.cur + 1, app.files.len());
+    let help = "q quit  j/k scroll  h/l ←→  n/p file  g/G top/bot  u view ";
+    let line = Line::from(vec![
+        Span::styled(pos, Style::default().fg(Color::Black).bg(Color::Gray)),
+        Span::styled(format!(" {help}"), Style::default().fg(Color::Gray)),
+    ]);
     f.render_widget(
-        Paragraph::new(help).style(
-            Style::default()
-                .fg(Color::Gray)
-                .bg(Color::Rgb(30, 30, 35)),
-        ),
+        Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 35))),
         area,
     );
 }
