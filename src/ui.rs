@@ -102,23 +102,66 @@ fn cell_line(cell: &Option<Cell>, kind: Kind, left: bool, h_off: usize, width: u
         ));
     };
 
-    let (fg, sign) = match (kind, left) {
-        (Kind::Equal, _) => (Color::Gray, ' '),
-        (Kind::Removed, _) => (Color::Red, '-'),
-        (Kind::Added, _) => (Color::Green, '+'),
-        (Kind::Changed, true) => (Color::Red, '-'),
-        (Kind::Changed, false) => (Color::Green, '+'),
+    let (fg, sign, hl_bg) = match (kind, left) {
+        (Kind::Equal, _) => (Color::Gray, ' ', Color::Reset),
+        (Kind::Removed, _) => (Color::Red, '-', Color::Rgb(90, 30, 30)),
+        (Kind::Added, _) => (Color::Green, '+', Color::Rgb(30, 70, 30)),
+        (Kind::Changed, true) => (Color::Red, '-', Color::Rgb(90, 30, 30)),
+        (Kind::Changed, false) => (Color::Green, '+', Color::Rgb(30, 70, 30)),
     };
 
     let gutter = format!("{:>4} ", cell.num);
     let text_w = width.saturating_sub(GUTTER + SIGN);
-    let body: String = cell.text.chars().skip(h_off).take(text_w).collect();
 
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(gutter, Style::default().fg(Color::DarkGray)),
         Span::styled(format!("{sign} "), Style::default().fg(fg)),
-        Span::styled(body, Style::default().fg(fg)),
-    ])
+    ];
+    spans.extend(text_spans(&cell.text, &cell.inline, h_off, text_w, fg, hl_bg));
+    Line::from(spans)
+}
+
+/// Visible slice of a line as styled spans, with intra-line changed ranges
+/// (byte offsets into `text`) drawn brighter. `h_off`/`width` are in characters.
+fn text_spans(
+    text: &str,
+    ranges: &[(usize, usize)],
+    h_off: usize,
+    width: usize,
+    fg: Color,
+    hl_bg: Color,
+) -> Vec<Span<'static>> {
+    let base = Style::default().fg(fg);
+    let hl = Style::default()
+        .fg(Color::White)
+        .bg(hl_bg)
+        .add_modifier(Modifier::BOLD);
+    let in_range = |b: usize| ranges.iter().any(|&(s, e)| b >= s && b < e);
+
+    let mut out: Vec<Span<'static>> = Vec::new();
+    let mut buf = String::new();
+    let mut buf_hot = false;
+    let mut shown = 0;
+
+    for (ci, (byte, ch)) in text.char_indices().enumerate() {
+        if ci < h_off {
+            continue;
+        }
+        if shown >= width {
+            break;
+        }
+        let hot = in_range(byte);
+        if !buf.is_empty() && hot != buf_hot {
+            out.push(Span::styled(std::mem::take(&mut buf), if buf_hot { hl } else { base }));
+        }
+        buf.push(ch);
+        buf_hot = hot;
+        shown += 1;
+    }
+    if !buf.is_empty() {
+        out.push(Span::styled(buf, if buf_hot { hl } else { base }));
+    }
+    out
 }
 
 fn status_style(status: char) -> Style {
@@ -135,4 +178,27 @@ fn status_style(status: char) -> Style {
 fn centered_row(area: Rect) -> Rect {
     let y = area.y + area.height / 2;
     Rect::new(area.x, y, area.width, 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_changed_range_into_hot_span() {
+        // "abXYef" with bytes 2..4 changed -> ["ab", "XY"(hot), "ef"].
+        let spans = text_spans("abXYef", &[(2, 4)], 0, 20, Color::Red, Color::Blue);
+        let parts: Vec<&str> = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(parts, vec!["ab", "XY", "ef"]);
+        assert_eq!(spans[1].style.bg, Some(Color::Blue)); // the highlighted run
+        assert_eq!(spans[0].style.bg, None);
+    }
+
+    #[test]
+    fn respects_horizontal_offset_and_width() {
+        // Skip 2 chars, show 3.
+        let spans = text_spans("abcdefgh", &[], 2, 3, Color::Gray, Color::Reset);
+        let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(joined, "cde");
+    }
 }
