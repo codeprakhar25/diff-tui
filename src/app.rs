@@ -23,6 +23,9 @@ pub struct App {
     pub viewport_h: usize,
     /// Horizontal scroll (in columns) of the file tab strip.
     pub tab_scroll: usize,
+    /// Scrollable line count of the current view, set each render so scrolling
+    /// clamps correctly (unified emits more lines than split).
+    pub content_len: usize,
 }
 
 impl App {
@@ -46,6 +49,7 @@ impl App {
             quit: false,
             viewport_h: 0,
             tab_scroll: 0,
+            content_len: 0,
         }
     }
 
@@ -65,7 +69,7 @@ impl App {
     }
 
     fn max_v(&self) -> usize {
-        self.rows().len().saturating_sub(self.viewport_h)
+        self.content_len.max(self.rows().len()).saturating_sub(self.viewport_h)
     }
 
     pub fn scroll_down(&mut self, n: usize) {

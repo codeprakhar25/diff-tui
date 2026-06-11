@@ -47,6 +47,9 @@ fn snapshot(app: &mut App, spec: &str) -> Result<()> {
             app.next_file();
         }
     }
+    if std::env::var("GITUI_VIEW").as_deref() == Ok("unified") {
+        app.toggle_view();
+    }
     let backend = ratatui::backend::TestBackend::new(w, h);
     let mut term = ratatui::Terminal::new(backend)?;
     term.draw(|f| ui::render(f, app))?;

@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{App, View};
 use crate::diff::{Cell, Kind};
 
 const GUTTER: usize = 5; // 4-digit line number + 1 space
@@ -27,12 +27,16 @@ pub fn render(f: &mut Frame, app: &mut App) {
     app.viewport_h = chunks[1].height as usize;
 
     if app.current_unchanged() {
+        app.content_len = 0;
         let msg = Paragraph::new("no traced changes for this file")
             .style(Style::default().fg(Color::DarkGray))
             .centered();
         f.render_widget(msg, centered_row(chunks[1]));
     } else {
-        render_split(f, chunks[1], app);
+        match app.view {
+            View::Split => render_split(f, chunks[1], app),
+            View::Unified => render_unified(f, chunks[1], app),
+        }
     }
 
     render_status(f, chunks[2], app);
@@ -89,10 +93,17 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_status(f: &mut Frame, area: Rect, app: &App) {
     let pos = format!(" [{}/{}] ", app.cur + 1, app.files.len());
-    let help = "q quit  j/k scroll  h/l ←→  n/p file  g/G top/bot  u view ";
+    let mode = match app.view {
+        View::Split => " SPLIT ",
+        View::Unified => " UNIFIED ",
+    };
+    let scroll = scroll_pct(app);
+    let help = "q quit  j/k scroll  h/l ←→  n/p file  g/G top/bot  u view";
     let line = Line::from(vec![
         Span::styled(pos, Style::default().fg(Color::Black).bg(Color::Gray)),
-        Span::styled(format!(" {help}"), Style::default().fg(Color::Gray)),
+        Span::styled(mode, Style::default().fg(Color::Black).bg(Color::Cyan)),
+        Span::styled(format!(" {help}  "), Style::default().fg(Color::Gray)),
+        Span::styled(scroll, Style::default().fg(Color::DarkGray)),
     ]);
     f.render_widget(
         Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 35))),
@@ -100,7 +111,23 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn render_split(f: &mut Frame, area: Rect, app: &App) {
+/// "Top" / "Bot" / "NN%" describing vertical scroll position.
+fn scroll_pct(app: &App) -> String {
+    let max = app.content_len.saturating_sub(app.viewport_h);
+    if max == 0 {
+        return "All".to_string();
+    }
+    if app.v_offset == 0 {
+        "Top".to_string()
+    } else if app.v_offset >= max {
+        "Bot".to_string()
+    } else {
+        format!("{}%", app.v_offset * 100 / max)
+    }
+}
+
+fn render_split(f: &mut Frame, area: Rect, app: &mut App) {
+    app.content_len = app.rows().len();
     let panes = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
@@ -123,6 +150,33 @@ fn render_split(f: &mut Frame, area: Rect, app: &App) {
         panes[0],
     );
     f.render_widget(Paragraph::new(right_lines), panes[1]);
+}
+
+/// Classic single-column unified diff. A changed row becomes two lines (the
+/// removed line then the added line); equal rows stay one context line.
+fn render_unified(f: &mut Frame, area: Rect, app: &mut App) {
+    let width = area.width as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for row in app.rows() {
+        match row.kind {
+            Kind::Equal => lines.push(cell_line(&row.left, Kind::Equal, true, app.h_offset, width)),
+            Kind::Removed => {
+                lines.push(cell_line(&row.left, Kind::Removed, true, app.h_offset, width))
+            }
+            Kind::Added => {
+                lines.push(cell_line(&row.right, Kind::Added, false, app.h_offset, width))
+            }
+            Kind::Changed => {
+                lines.push(cell_line(&row.left, Kind::Changed, true, app.h_offset, width));
+                lines.push(cell_line(&row.right, Kind::Changed, false, app.h_offset, width));
+            }
+        }
+    }
+    app.content_len = lines.len();
+
+    let h = area.height as usize;
+    let visible: Vec<Line> = lines.into_iter().skip(app.v_offset).take(h).collect();
+    f.render_widget(Paragraph::new(visible), area);
 }
 
 /// Build a styled line for one cell. `width` is the full pane inner width.
