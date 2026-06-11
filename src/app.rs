@@ -3,6 +3,7 @@
 
 use crate::diff::{self, Row};
 use crate::git::FileDiff;
+use crate::highlight::{Highlighter, LineSegs};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum View {
@@ -14,6 +15,10 @@ pub struct App {
     pub files: Vec<FileDiff>,
     /// Aligned rows, one Vec per file (parallel to `files`).
     pub rows: Vec<Vec<Row>>,
+    /// Per-file syntax segments for the old/new sides (parallel to `files`).
+    pub hl: Vec<(Vec<LineSegs>, Vec<LineSegs>)>,
+    /// Whether syntax highlighting is currently applied.
+    pub syntax: bool,
     pub cur: usize,
     pub v_offset: usize,
     pub h_offset: usize,
@@ -39,9 +44,21 @@ impl App {
                 )
             })
             .collect();
+        let hilite = Highlighter::new();
+        let hl = files
+            .iter()
+            .map(|f| {
+                (
+                    hilite.file(&f.path, f.old.as_deref().unwrap_or("")),
+                    hilite.file(&f.path, f.new.as_deref().unwrap_or("")),
+                )
+            })
+            .collect();
         App {
             files,
             rows,
+            hl,
+            syntax: true,
             cur: 0,
             v_offset: 0,
             h_offset: 0,
@@ -66,6 +83,21 @@ impl App {
     /// True when the current file has no actual changes.
     pub fn current_unchanged(&self) -> bool {
         self.rows().iter().all(|r| r.kind == diff::Kind::Equal)
+    }
+
+    /// Syntax segments for line `num` (1-based) on the given side of the current
+    /// file, or None when highlighting is off / out of range.
+    pub fn segs(&self, left: bool, num: usize) -> Option<&LineSegs> {
+        if !self.syntax {
+            return None;
+        }
+        let (old, new) = &self.hl[self.cur];
+        let side = if left { old } else { new };
+        side.get(num.saturating_sub(1))
+    }
+
+    pub fn toggle_syntax(&mut self) {
+        self.syntax = !self.syntax;
     }
 
     fn max_v(&self) -> usize {

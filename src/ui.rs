@@ -11,6 +11,7 @@ use ratatui::{
 
 use crate::app::{App, View};
 use crate::diff::{Cell, Kind};
+use crate::highlight::{self, LineSegs};
 
 const GUTTER: usize = 5; // 4-digit line number + 1 space
 const SIGN: usize = 2; // sign char + 1 space
@@ -141,8 +142,10 @@ fn render_split(f: &mut Frame, area: Rect, app: &mut App) {
     let left_w = panes[0].width.saturating_sub(1) as usize; // -1 for divider border
     let right_w = panes[1].width as usize;
     for row in window {
-        left_lines.push(cell_line(&row.left, row.kind, true, app.h_offset, left_w));
-        right_lines.push(cell_line(&row.right, row.kind, false, app.h_offset, right_w));
+        let lseg = row.left.as_ref().and_then(|c| app.segs(true, c.num));
+        let rseg = row.right.as_ref().and_then(|c| app.segs(false, c.num));
+        left_lines.push(cell_line(&row.left, row.kind, true, app.h_offset, left_w, lseg));
+        right_lines.push(cell_line(&row.right, row.kind, false, app.h_offset, right_w, rseg));
     }
 
     f.render_widget(
@@ -158,17 +161,21 @@ fn render_unified(f: &mut Frame, area: Rect, app: &mut App) {
     let width = area.width as usize;
     let mut lines: Vec<Line> = Vec::new();
     for row in app.rows() {
+        let lseg = row.left.as_ref().and_then(|c| app.segs(true, c.num));
+        let rseg = row.right.as_ref().and_then(|c| app.segs(false, c.num));
         match row.kind {
-            Kind::Equal => lines.push(cell_line(&row.left, Kind::Equal, true, app.h_offset, width)),
+            Kind::Equal => {
+                lines.push(cell_line(&row.left, Kind::Equal, true, app.h_offset, width, lseg))
+            }
             Kind::Removed => {
-                lines.push(cell_line(&row.left, Kind::Removed, true, app.h_offset, width))
+                lines.push(cell_line(&row.left, Kind::Removed, true, app.h_offset, width, lseg))
             }
             Kind::Added => {
-                lines.push(cell_line(&row.right, Kind::Added, false, app.h_offset, width))
+                lines.push(cell_line(&row.right, Kind::Added, false, app.h_offset, width, rseg))
             }
             Kind::Changed => {
-                lines.push(cell_line(&row.left, Kind::Changed, true, app.h_offset, width));
-                lines.push(cell_line(&row.right, Kind::Changed, false, app.h_offset, width));
+                lines.push(cell_line(&row.left, Kind::Changed, true, app.h_offset, width, lseg));
+                lines.push(cell_line(&row.right, Kind::Changed, false, app.h_offset, width, rseg));
             }
         }
     }
@@ -180,7 +187,15 @@ fn render_unified(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 /// Build a styled line for one cell. `width` is the full pane inner width.
-fn cell_line(cell: &Option<Cell>, kind: Kind, left: bool, h_off: usize, width: usize) -> Line<'static> {
+/// `segs` carries precomputed syntax foreground runs (None = no highlighting).
+fn cell_line(
+    cell: &Option<Cell>,
+    kind: Kind,
+    left: bool,
+    h_off: usize,
+    width: usize,
+    segs: Option<&LineSegs>,
+) -> Line<'static> {
     let Some(cell) = cell else {
         // Padding gap — faint tilde marker so the eye reads it as "nothing here".
         return Line::from(Span::styled(
@@ -189,12 +204,16 @@ fn cell_line(cell: &Option<Cell>, kind: Kind, left: bool, h_off: usize, width: u
         ));
     };
 
-    let (fg, sign, hl_bg) = match (kind, left) {
-        (Kind::Equal, _) => (Color::Gray, ' ', Color::Reset),
-        (Kind::Removed, _) => (Color::Red, '-', Color::Rgb(90, 30, 30)),
-        (Kind::Added, _) => (Color::Green, '+', Color::Rgb(30, 70, 30)),
-        (Kind::Changed, true) => (Color::Red, '-', Color::Rgb(90, 30, 30)),
-        (Kind::Changed, false) => (Color::Green, '+', Color::Rgb(30, 70, 30)),
+    // fallback fg (when no syntax color), sign, subtle whole-line bg, strong
+    // inline-change bg.
+    let (fallback, sign, line_bg, hot_bg) = match (kind, left) {
+        (Kind::Equal, _) => (Color::Gray, ' ', Color::Reset, Color::Reset),
+        (Kind::Removed, _) | (Kind::Changed, true) => {
+            (Color::Red, '-', Color::Rgb(48, 26, 26), Color::Rgb(95, 35, 35))
+        }
+        (Kind::Added, _) | (Kind::Changed, false) => {
+            (Color::Green, '+', Color::Rgb(24, 42, 24), Color::Rgb(35, 80, 35))
+        }
     };
 
     let gutter = format!("{:>4} ", cell.num);
@@ -202,32 +221,51 @@ fn cell_line(cell: &Option<Cell>, kind: Kind, left: bool, h_off: usize, width: u
 
     let mut spans = vec![
         Span::styled(gutter, Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{sign} "), Style::default().fg(fg)),
+        Span::styled(format!("{sign} "), Style::default().fg(fallback)),
     ];
-    spans.extend(text_spans(&cell.text, &cell.inline, h_off, text_w, fg, hl_bg));
+    spans.extend(styled_text(
+        &cell.text,
+        segs,
+        &cell.inline,
+        h_off,
+        text_w,
+        fallback,
+        line_bg,
+        hot_bg,
+    ));
     Line::from(spans)
 }
 
-/// Visible slice of a line as styled spans, with intra-line changed ranges
-/// (byte offsets into `text`) drawn brighter. `h_off`/`width` are in characters.
-fn text_spans(
+/// Visible slice of a line as styled spans. Foreground comes from syntax
+/// segments (or `fallback_fg`); background is `line_bg`, upgraded to `hot_bg`
+/// (plus bold) inside the intra-line changed ranges. `h_off`/`width` are chars.
+#[allow(clippy::too_many_arguments)]
+fn styled_text(
     text: &str,
+    segs: Option<&LineSegs>,
     ranges: &[(usize, usize)],
     h_off: usize,
     width: usize,
-    fg: Color,
-    hl_bg: Color,
+    fallback_fg: Color,
+    line_bg: Color,
+    hot_bg: Color,
 ) -> Vec<Span<'static>> {
-    let base = Style::default().fg(fg);
-    let hl = Style::default()
-        .fg(Color::White)
-        .bg(hl_bg)
-        .add_modifier(Modifier::BOLD);
     let in_range = |b: usize| ranges.iter().any(|&(s, e)| b >= s && b < e);
+    let style = |fg: Color, hot: bool| {
+        let bg = if hot { hot_bg } else { line_bg };
+        let mut s = Style::default().fg(fg);
+        if bg != Color::Reset {
+            s = s.bg(bg);
+        }
+        if hot {
+            s = s.add_modifier(Modifier::BOLD);
+        }
+        s
+    };
 
     let mut out: Vec<Span<'static>> = Vec::new();
     let mut buf = String::new();
-    let mut buf_hot = false;
+    let mut cur: Option<(Color, bool)> = None;
     let mut shown = 0;
 
     for (ci, (byte, ch)) in text.char_indices().enumerate() {
@@ -237,16 +275,18 @@ fn text_spans(
         if shown >= width {
             break;
         }
+        let fg = segs.and_then(|s| highlight::color_at(s, byte)).unwrap_or(fallback_fg);
         let hot = in_range(byte);
-        if !buf.is_empty() && hot != buf_hot {
-            out.push(Span::styled(std::mem::take(&mut buf), if buf_hot { hl } else { base }));
+        if cur.is_some() && cur != Some((fg, hot)) {
+            let (f, h) = cur.unwrap();
+            out.push(Span::styled(std::mem::take(&mut buf), style(f, h)));
         }
         buf.push(ch);
-        buf_hot = hot;
+        cur = Some((fg, hot));
         shown += 1;
     }
-    if !buf.is_empty() {
-        out.push(Span::styled(buf, if buf_hot { hl } else { base }));
+    if let Some((f, h)) = cur {
+        out.push(Span::styled(buf, style(f, h)));
     }
     out
 }
@@ -274,18 +314,35 @@ mod tests {
     #[test]
     fn splits_changed_range_into_hot_span() {
         // "abXYef" with bytes 2..4 changed -> ["ab", "XY"(hot), "ef"].
-        let spans = text_spans("abXYef", &[(2, 4)], 0, 20, Color::Red, Color::Blue);
+        let spans = styled_text(
+            "abXYef", None, &[(2, 4)], 0, 20, Color::Red, Color::Reset, Color::Blue,
+        );
         let parts: Vec<&str> = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(parts, vec!["ab", "XY", "ef"]);
-        assert_eq!(spans[1].style.bg, Some(Color::Blue)); // the highlighted run
-        assert_eq!(spans[0].style.bg, None);
+        assert_eq!(spans[1].style.bg, Some(Color::Blue)); // hot run gets hot_bg
+        assert_eq!(spans[0].style.bg, None); // line_bg Reset -> no bg
     }
 
     #[test]
     fn respects_horizontal_offset_and_width() {
         // Skip 2 chars, show 3.
-        let spans = text_spans("abcdefgh", &[], 2, 3, Color::Gray, Color::Reset);
+        let spans = styled_text(
+            "abcdefgh", None, &[], 2, 3, Color::Gray, Color::Reset, Color::Reset,
+        );
         let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(joined, "cde");
+    }
+
+    #[test]
+    fn syntax_segments_drive_foreground() {
+        // Two color runs from "syntax" -> two spans with those fgs.
+        let segs: LineSegs = vec![(0, 2, Color::Red), (2, 4, Color::Green)];
+        let spans = styled_text(
+            "abcd", Some(&segs), &[], 0, 20, Color::Gray, Color::Reset, Color::Reset,
+        );
+        let parts: Vec<&str> = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(parts, vec!["ab", "cd"]);
+        assert_eq!(spans[0].style.fg, Some(Color::Red));
+        assert_eq!(spans[1].style.fg, Some(Color::Green));
     }
 }

@@ -3,6 +3,7 @@
 mod app;
 mod diff;
 mod git;
+mod highlight;
 mod ui;
 
 use anyhow::{bail, Result};
@@ -93,6 +94,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         KeyCode::Char('n') | KeyCode::Tab => app.next_file(),
         KeyCode::Char('p') | KeyCode::BackTab => app.prev_file(),
         KeyCode::Char('u') => app.toggle_view(),
+        KeyCode::Char('s') => app.toggle_syntax(),
         _ => {}
     }
 }
