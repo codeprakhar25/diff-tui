@@ -11,10 +11,40 @@ use app::App;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
 
+const HELP: &str = "\
+git-ui — a VS Code-style split git diff viewer for the terminal
+
+USAGE:
+    git-ui <file>        Diff a file's working-tree changes vs HEAD
+    git-ui all           Diff every uncommitted change in the working tree
+    git-ui <commit>      Diff everything a commit changed (vs its parent)
+
+OPTIONS:
+    -h, --help           Show this help
+    -V, --version        Show version
+
+KEYS:
+    j/k ↑/↓   scroll        h/l ←/→   scroll horizontally
+    n/p Tab   next/prev file g/G       top/bottom
+    u         split/unified  s         toggle syntax highlight
+    q/Esc     quit
+";
+
 fn main() -> Result<()> {
     let arg = match std::env::args().nth(1) {
+        Some(a) if a == "-h" || a == "--help" => {
+            print!("{HELP}");
+            return Ok(());
+        }
+        Some(a) if a == "-V" || a == "--version" => {
+            println!("git-ui {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
         Some(a) => a,
-        None => bail!("usage: git-ui <file|all|commit>"),
+        None => {
+            print!("{HELP}");
+            bail!("missing argument");
+        }
     };
 
     let mode = git::resolve_mode(&arg)?;

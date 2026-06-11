@@ -2,6 +2,11 @@
 name = "git-ui"
 version = "0.1.0"
 edition = "2024"
+description = "A VS Code-style split git diff viewer for the terminal"
+license = "MIT"
+readme = "README.md"
+keywords = ["git", "diff", "tui", "terminal", "ratatui"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1.0.102"
