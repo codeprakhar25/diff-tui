@@ -1,13 +1,14 @@
-//! M1: validate mode-resolution + diff alignment by dumping to stdout.
-//! TUI lands in M2.
+//! git-ui: VS Code-style split diff viewer in the terminal.
 
+mod app;
 mod diff;
 mod git;
+mod ui;
 
 use anyhow::{bail, Result};
-use diff::{Kind, Row};
-
-const W: usize = 50; // column width per side for the stdout dump
+use app::App;
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::DefaultTerminal;
 
 fn main() -> Result<()> {
     let arg = match std::env::args().nth(1) {
@@ -17,72 +18,73 @@ fn main() -> Result<()> {
 
     let mode = git::resolve_mode(&arg)?;
     let files = git::collect(&mode)?;
-
     if files.is_empty() {
         println!("no traced changes");
         return Ok(());
     }
 
-    for f in &files {
-        println!("\n=== {} ({}) ===", f.path, f.status);
-        let old = f.old.as_deref().unwrap_or("");
-        let new = f.new.as_deref().unwrap_or("");
-        let rows = diff::build(old, new);
-        if rows.iter().all(|r| r.kind == Kind::Equal) {
-            println!("  no traced changes for this file");
-            continue;
+    let mut app = App::new(files);
+
+    // Headless render for testing where there's no TTY: GITUI_SNAP=WxH dumps a
+    // single frame to stdout and exits.
+    if let Ok(spec) = std::env::var("GITUI_SNAP") {
+        return snapshot(&mut app, &spec);
+    }
+
+    let mut term = ratatui::init();
+    let res = run(&mut term, &mut app);
+    ratatui::restore();
+    res
+}
+
+fn snapshot(app: &mut App, spec: &str) -> Result<()> {
+    let (w, h) = spec
+        .split_once('x')
+        .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))
+        .unwrap_or((100u16, 24u16));
+    let backend = ratatui::backend::TestBackend::new(w, h);
+    let mut term = ratatui::Terminal::new(backend)?;
+    term.draw(|f| ui::render(f, app))?;
+    let buf = term.backend().buffer();
+    for y in 0..h {
+        let mut line = String::new();
+        for x in 0..w {
+            line.push_str(buf[(x, y)].symbol());
         }
-        for row in &rows {
-            println!("{}", fmt_row(row));
+        println!("{}", line.trim_end());
+    }
+    Ok(())
+}
+
+fn run(term: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+    while !app.quit {
+        term.draw(|f| ui::render(f, app))?;
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            handle_key(app, key.code, key.modifiers);
         }
     }
     Ok(())
 }
 
-fn fmt_row(row: &Row) -> String {
-    let (lsign, ltext) = side(&row.left, row.kind, true);
-    let (rsign, rtext) = side(&row.right, row.kind, false);
-    format!("{lsign} {ltext:<W$} │ {rsign} {rtext}", W = W)
-}
-
-/// Render one cell to (sign, text). `[..]` markers wrap inline-changed spans so
-/// we can eyeball intra-line highlight before real styling exists.
-fn side(cell: &Option<diff::Cell>, kind: Kind, left: bool) -> (char, String) {
-    let sign = match (kind, cell.is_some()) {
-        (_, false) => ' ',
-        (Kind::Equal, _) => ' ',
-        (Kind::Removed, _) => '-',
-        (Kind::Added, _) => '+',
-        (Kind::Changed, _) => {
-            if left {
-                '-'
-            } else {
-                '+'
-            }
-        }
-    };
-    let text = match cell {
-        None => String::new(),
-        Some(c) => format!("{:>4} {}", c.num, mark_inline(&c.text, &c.inline)),
-    };
-    (sign, text)
-}
-
-fn mark_inline(text: &str, ranges: &[(usize, usize)]) -> String {
-    if ranges.is_empty() {
-        return text.to_string();
+fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
+    let page = app.viewport_h.max(1);
+    match code {
+        KeyCode::Char('q') | KeyCode::Esc => app.quit = true,
+        KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => app.quit = true,
+        KeyCode::Char('j') | KeyCode::Down => app.scroll_down(1),
+        KeyCode::Char('k') | KeyCode::Up => app.scroll_up(1),
+        KeyCode::Char('l') | KeyCode::Right => app.scroll_right(4),
+        KeyCode::Char('h') | KeyCode::Left => app.scroll_left(4),
+        KeyCode::PageDown => app.scroll_down(page),
+        KeyCode::PageUp => app.scroll_up(page),
+        KeyCode::Char('g') | KeyCode::Home => app.top(),
+        KeyCode::Char('G') | KeyCode::End => app.bottom(),
+        KeyCode::Char('n') | KeyCode::Tab => app.next_file(),
+        KeyCode::Char('p') | KeyCode::BackTab => app.prev_file(),
+        KeyCode::Char('u') => app.toggle_view(),
+        _ => {}
     }
-    let mut out = String::new();
-    let mut pos = 0;
-    for &(s, e) in ranges {
-        if s > pos {
-            out.push_str(&text[pos..s]);
-        }
-        out.push('[');
-        out.push_str(&text[s..e]);
-        out.push(']');
-        pos = e;
-    }
-    out.push_str(&text[pos..]);
-    out
 }
