@@ -28,6 +28,9 @@ markers.
 
 - **Side-by-side split diff** — removed lines left (red), added lines right
   (green), unchanged lines aligned across both panes.
+- **Live watch mode** — `--watch` re-reads on a timer so the diff updates as your
+  editor (or an AI agent) writes files, keeping your position.
+- **Resizable panes** — widen either side with `[` / `]` for long lines.
 - **Intra-line highlighting** — changed words/characters within a line are
   highlighted, like VS Code's inline diff.
 - **Syntax highlighting** — language-aware coloring layered under the diff
@@ -84,6 +87,7 @@ Run inside any git repository:
 git-ui <file>        # one file: working-tree changes vs HEAD
 git-ui all           # every uncommitted change in the working tree
 git-ui <commit>      # everything a commit changed (commit vs its parent)
+git-ui all --watch   # live-reload as files change (great while coding)
 ```
 
 Examples:
@@ -113,9 +117,13 @@ If a file has no changes, `git-ui` says so instead of showing an empty diff.
 | `g` / `G`          | Jump to top / bottom            |
 | `n` / `Tab`        | Next file                       |
 | `p` / `Shift+Tab`  | Previous file                   |
+| `[` / `]`          | Narrow / widen left pane        |
 | `u`                | Toggle split / unified view     |
 | `s`                | Toggle syntax highlighting      |
 | `q` / `Esc` / `Ctrl+C` | Quit                        |
+
+Run with `-w` / `--watch` to live-reload the diff as files change on disk —
+handy for watching an AI agent edit your code in real time.
 
 ## How it works
 

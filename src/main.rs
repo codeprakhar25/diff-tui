@@ -10,6 +10,10 @@ use anyhow::{bail, Result};
 use app::App;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
+use std::time::Duration;
+
+/// How often `--watch` re-polls git for changes.
+const WATCH_TICK: Duration = Duration::from_millis(400);
 
 const HELP: &str = "\
 git-ui — a VS Code-style split git diff viewer for the terminal
@@ -20,27 +24,30 @@ USAGE:
     git-ui <commit>      Diff everything a commit changed (vs its parent)
 
 OPTIONS:
+    -w, --watch          Live-reload as files change on disk
     -h, --help           Show this help
     -V, --version        Show version
 
 KEYS:
     j/k ↑/↓   scroll        h/l ←/→   scroll horizontally
     n/p Tab   next/prev file g/G       top/bottom
-    u         split/unified  s         toggle syntax highlight
-    q/Esc     quit
+    [ / ]     resize panes   u         split/unified
+    s         syntax on/off  q/Esc     quit
 ";
 
 fn main() -> Result<()> {
-    let arg = match std::env::args().nth(1) {
-        Some(a) if a == "-h" || a == "--help" => {
-            print!("{HELP}");
-            return Ok(());
-        }
-        Some(a) if a == "-V" || a == "--version" => {
-            println!("git-ui {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
-        }
-        Some(a) => a,
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print!("{HELP}");
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "-V" || a == "--version") {
+        println!("git-ui {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    let watch = args.iter().any(|a| a == "-w" || a == "--watch");
+    let arg = match args.iter().find(|a| !a.starts_with('-')) {
+        Some(a) => a.clone(),
         None => {
             print!("{HELP}");
             bail!("missing argument");
@@ -49,12 +56,14 @@ fn main() -> Result<()> {
 
     let mode = git::resolve_mode(&arg)?;
     let files = git::collect(&mode)?;
-    if files.is_empty() {
+    // Without --watch an empty diff is just a message; with --watch we keep the
+    // TUI open so changes can appear.
+    if files.is_empty() && !watch {
         println!("no traced changes");
         return Ok(());
     }
 
-    let mut app = App::new(files);
+    let mut app = App::new(mode, files, watch);
 
     // Headless render for testing where there's no TTY: GITUI_SNAP=WxH dumps a
     // single frame to stdout and exits.
@@ -98,6 +107,11 @@ fn snapshot(app: &mut App, spec: &str) -> Result<()> {
 fn run(term: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     while !app.quit {
         term.draw(|f| ui::render(f, app))?;
+        // In watch mode, wake on the timer to re-poll git even with no input.
+        if app.watch && !event::poll(WATCH_TICK)? {
+            app.reload();
+            continue;
+        }
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
                 continue;
@@ -123,6 +137,8 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) {
         KeyCode::Char('G') | KeyCode::End => app.bottom(),
         KeyCode::Char('n') | KeyCode::Tab => app.next_file(),
         KeyCode::Char('p') | KeyCode::BackTab => app.prev_file(),
+        KeyCode::Char(']') => app.widen_left(),
+        KeyCode::Char('[') => app.widen_right(),
         KeyCode::Char('u') => app.toggle_view(),
         KeyCode::Char('s') => app.toggle_syntax(),
         _ => {}

@@ -20,7 +20,7 @@ pub enum Mode {
 }
 
 /// One file's before/after, ready to diff.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FileDiff {
     pub path: String,
     pub status: char,

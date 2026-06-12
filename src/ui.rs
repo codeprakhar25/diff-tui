@@ -24,8 +24,19 @@ pub fn render(f: &mut Frame, app: &mut App) {
     ])
     .split(f.area());
 
-    render_tabs(f, chunks[0], app);
     app.viewport_h = chunks[1].height as usize;
+
+    // Watch mode with nothing to show yet (e.g. all changes reverted).
+    if app.files.is_empty() {
+        let msg = Paragraph::new("watching — no changes yet")
+            .style(Style::default().fg(Color::DarkGray))
+            .centered();
+        f.render_widget(msg, centered_row(chunks[1]));
+        render_status(f, chunks[2], app);
+        return;
+    }
+
+    render_tabs(f, chunks[0], app);
 
     if app.current_unchanged() {
         app.content_len = 0;
@@ -93,19 +104,30 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn render_status(f: &mut Frame, area: Rect, app: &App) {
-    let pos = format!(" [{}/{}] ", app.cur + 1, app.files.len());
+    let cur = if app.files.is_empty() { 0 } else { app.cur + 1 };
+    let pos = format!(" [{}/{}] ", cur, app.files.len());
     let mode = match app.view {
         View::Split => " SPLIT ",
         View::Unified => " UNIFIED ",
     };
     let scroll = scroll_pct(app);
-    let help = "q quit  j/k scroll  h/l ←→  n/p file  g/G top/bot  u view";
-    let line = Line::from(vec![
-        Span::styled(pos, Style::default().fg(Color::Black).bg(Color::Gray)),
+    let help = "q quit  j/k scroll  h/l ←→  n/p file  [ ] width  u view";
+    let mut spans = vec![Span::styled(
+        pos,
+        Style::default().fg(Color::Black).bg(Color::Gray),
+    )];
+    if app.watch {
+        spans.push(Span::styled(
+            " WATCH ",
+            Style::default().fg(Color::Black).bg(Color::Green),
+        ));
+    }
+    spans.extend([
         Span::styled(mode, Style::default().fg(Color::Black).bg(Color::Cyan)),
         Span::styled(format!(" {help}  "), Style::default().fg(Color::Gray)),
         Span::styled(scroll, Style::default().fg(Color::DarkGray)),
     ]);
+    let line = Line::from(spans);
     f.render_widget(
         Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 35))),
         area,
@@ -129,8 +151,11 @@ fn scroll_pct(app: &App) -> String {
 
 fn render_split(f: &mut Frame, area: Rect, app: &mut App) {
     app.content_len = app.rows().len();
-    let panes = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+    let panes = Layout::horizontal([
+        Constraint::Percentage(app.split_pct),
+        Constraint::Percentage(100 - app.split_pct),
+    ])
+    .split(area);
 
     let rows = app.rows();
     let h = area.height as usize;
