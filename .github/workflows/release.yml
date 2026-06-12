@@ -20,10 +20,12 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: macos-13
-            target: x86_64-apple-darwin
+          # Both mac targets build on the Apple-Silicon runner: aarch64 native,
+          # x86_64 via cross-compile. Avoids the scarce/slow macos-13 Intel runner.
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
