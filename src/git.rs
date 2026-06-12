@@ -1,7 +1,7 @@
 //! Thin wrapper over the `git` CLI. We shell out instead of linking libgit2 to
 //! keep the dependency surface small.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::process::Command;
 
 /// Git's well-known empty-tree object (sha1 repos). Used as the "parent" of a
@@ -61,7 +61,12 @@ pub fn resolve_mode(arg: &str) -> Result<Mode> {
         return Ok(Mode::File(arg.to_string()));
     }
     // Otherwise try to read it as a commit-ish.
-    if git(&["rev-parse", "--verify", &format!("{arg}^{{commit}}")], true)?.is_some() {
+    if git(
+        &["rev-parse", "--verify", &format!("{arg}^{{commit}}")],
+        true,
+    )?
+    .is_some()
+    {
         return Ok(Mode::Commit(arg.to_string()));
     }
     bail!("'{arg}' is not a tracked file, an existing path, 'all', or a commit");
@@ -84,7 +89,7 @@ fn parse_name_status(raw: &str) -> Vec<(char, String)> {
             let mut parts = line.split('\t');
             let status = parts.next()?.chars().next()?;
             // Renames/copies emit `R100<TAB>old<TAB>new`; take the new path.
-            let path = parts.last()?.to_string();
+            let path = parts.next_back()?.to_string();
             Some((status, path))
         })
         .collect()
@@ -122,8 +127,8 @@ pub fn collect(mode: &Mode) -> Result<Vec<FileDiff>> {
                 .collect::<Result<_>>()?;
             // Untracked files: `git diff` ignores them, but they're real changes
             // while coding. List them as additions.
-            let others = git(&["ls-files", "--others", "--exclude-standard"], false)?
-                .unwrap_or_default();
+            let others =
+                git(&["ls-files", "--others", "--exclude-standard"], false)?.unwrap_or_default();
             for path in others.lines().filter(|l| !l.is_empty()) {
                 files.push(FileDiff {
                     old: None,
@@ -148,7 +153,11 @@ pub fn collect(mode: &Mode) -> Result<Vec<FileDiff>> {
                 .into_iter()
                 .map(|(status, path)| {
                     Ok(FileDiff {
-                        old: if has_parent { show(&parent, &path)? } else { None },
+                        old: if has_parent {
+                            show(&parent, &path)?
+                        } else {
+                            None
+                        },
                         new: show(id, &path)?,
                         path,
                         status,

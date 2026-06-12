@@ -2,11 +2,11 @@
 //! scroll, header + status bar. Intra-line highlight comes in M3.
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::app::{App, View};
@@ -169,8 +169,22 @@ fn render_split(f: &mut Frame, area: Rect, app: &mut App) {
     for row in window {
         let lseg = row.left.as_ref().and_then(|c| app.segs(true, c.num));
         let rseg = row.right.as_ref().and_then(|c| app.segs(false, c.num));
-        left_lines.push(cell_line(&row.left, row.kind, true, app.h_offset, left_w, lseg));
-        right_lines.push(cell_line(&row.right, row.kind, false, app.h_offset, right_w, rseg));
+        left_lines.push(cell_line(
+            &row.left,
+            row.kind,
+            true,
+            app.h_offset,
+            left_w,
+            lseg,
+        ));
+        right_lines.push(cell_line(
+            &row.right,
+            row.kind,
+            false,
+            app.h_offset,
+            right_w,
+            rseg,
+        ));
     }
 
     f.render_widget(
@@ -189,18 +203,47 @@ fn render_unified(f: &mut Frame, area: Rect, app: &mut App) {
         let lseg = row.left.as_ref().and_then(|c| app.segs(true, c.num));
         let rseg = row.right.as_ref().and_then(|c| app.segs(false, c.num));
         match row.kind {
-            Kind::Equal => {
-                lines.push(cell_line(&row.left, Kind::Equal, true, app.h_offset, width, lseg))
-            }
-            Kind::Removed => {
-                lines.push(cell_line(&row.left, Kind::Removed, true, app.h_offset, width, lseg))
-            }
-            Kind::Added => {
-                lines.push(cell_line(&row.right, Kind::Added, false, app.h_offset, width, rseg))
-            }
+            Kind::Equal => lines.push(cell_line(
+                &row.left,
+                Kind::Equal,
+                true,
+                app.h_offset,
+                width,
+                lseg,
+            )),
+            Kind::Removed => lines.push(cell_line(
+                &row.left,
+                Kind::Removed,
+                true,
+                app.h_offset,
+                width,
+                lseg,
+            )),
+            Kind::Added => lines.push(cell_line(
+                &row.right,
+                Kind::Added,
+                false,
+                app.h_offset,
+                width,
+                rseg,
+            )),
             Kind::Changed => {
-                lines.push(cell_line(&row.left, Kind::Changed, true, app.h_offset, width, lseg));
-                lines.push(cell_line(&row.right, Kind::Changed, false, app.h_offset, width, rseg));
+                lines.push(cell_line(
+                    &row.left,
+                    Kind::Changed,
+                    true,
+                    app.h_offset,
+                    width,
+                    lseg,
+                ));
+                lines.push(cell_line(
+                    &row.right,
+                    Kind::Changed,
+                    false,
+                    app.h_offset,
+                    width,
+                    rseg,
+                ));
             }
         }
     }
@@ -233,12 +276,18 @@ fn cell_line(
     // inline-change bg.
     let (fallback, sign, line_bg, hot_bg) = match (kind, left) {
         (Kind::Equal, _) => (Color::Gray, ' ', Color::Reset, Color::Reset),
-        (Kind::Removed, _) | (Kind::Changed, true) => {
-            (Color::Red, '-', Color::Rgb(48, 26, 26), Color::Rgb(95, 35, 35))
-        }
-        (Kind::Added, _) | (Kind::Changed, false) => {
-            (Color::Green, '+', Color::Rgb(24, 42, 24), Color::Rgb(35, 80, 35))
-        }
+        (Kind::Removed, _) | (Kind::Changed, true) => (
+            Color::Red,
+            '-',
+            Color::Rgb(48, 26, 26),
+            Color::Rgb(95, 35, 35),
+        ),
+        (Kind::Added, _) | (Kind::Changed, false) => (
+            Color::Green,
+            '+',
+            Color::Rgb(24, 42, 24),
+            Color::Rgb(35, 80, 35),
+        ),
     };
 
     let gutter = format!("{:>4} ", cell.num);
@@ -300,10 +349,13 @@ fn styled_text(
         if shown >= width {
             break;
         }
-        let fg = segs.and_then(|s| highlight::color_at(s, byte)).unwrap_or(fallback_fg);
+        let fg = segs
+            .and_then(|s| highlight::color_at(s, byte))
+            .unwrap_or(fallback_fg);
         let hot = in_range(byte);
-        if cur.is_some() && cur != Some((fg, hot)) {
-            let (f, h) = cur.unwrap();
+        if let Some((f, h)) = cur
+            && cur != Some((fg, hot))
+        {
             out.push(Span::styled(std::mem::take(&mut buf), style(f, h)));
         }
         buf.push(ch);
@@ -340,7 +392,14 @@ mod tests {
     fn splits_changed_range_into_hot_span() {
         // "abXYef" with bytes 2..4 changed -> ["ab", "XY"(hot), "ef"].
         let spans = styled_text(
-            "abXYef", None, &[(2, 4)], 0, 20, Color::Red, Color::Reset, Color::Blue,
+            "abXYef",
+            None,
+            &[(2, 4)],
+            0,
+            20,
+            Color::Red,
+            Color::Reset,
+            Color::Blue,
         );
         let parts: Vec<&str> = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(parts, vec!["ab", "XY", "ef"]);
@@ -352,7 +411,14 @@ mod tests {
     fn respects_horizontal_offset_and_width() {
         // Skip 2 chars, show 3.
         let spans = styled_text(
-            "abcdefgh", None, &[], 2, 3, Color::Gray, Color::Reset, Color::Reset,
+            "abcdefgh",
+            None,
+            &[],
+            2,
+            3,
+            Color::Gray,
+            Color::Reset,
+            Color::Reset,
         );
         let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(joined, "cde");
@@ -363,7 +429,14 @@ mod tests {
         // Two color runs from "syntax" -> two spans with those fgs.
         let segs: LineSegs = vec![(0, 2, Color::Red), (2, 4, Color::Green)];
         let spans = styled_text(
-            "abcd", Some(&segs), &[], 0, 20, Color::Gray, Color::Reset, Color::Reset,
+            "abcd",
+            Some(&segs),
+            &[],
+            0,
+            20,
+            Color::Gray,
+            Color::Reset,
+            Color::Reset,
         );
         let parts: Vec<&str> = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(parts, vec!["ab", "cd"]);

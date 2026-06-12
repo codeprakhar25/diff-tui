@@ -6,10 +6,10 @@ mod git;
 mod highlight;
 mod ui;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use app::App;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 
 /// How often `--watch` re-polls git for changes.
@@ -25,6 +25,8 @@ USAGE:
 
 OPTIONS:
     -w, --watch          Live-reload as files change on disk
+    -t, --theme <NAME>   Syntax theme: ocean (default), eighties, mocha,
+                         ocean-light, github, solarized-dark, solarized-light
     -h, --help           Show this help
     -V, --version        Show version
 
@@ -46,8 +48,25 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let watch = args.iter().any(|a| a == "-w" || a == "--watch");
-    let arg = match args.iter().find(|a| !a.starts_with('-')) {
-        Some(a) => a.clone(),
+    let theme = parse_theme(&args).unwrap_or_else(|| "ocean".to_string());
+    if !highlight::THEMES.contains(&theme.as_str()) && theme != "dark" && theme != "light" {
+        eprintln!(
+            "git-ui: unknown theme '{theme}', using default. options: {}",
+            highlight::THEMES.join(", ")
+        );
+    }
+    // Positional = first non-flag arg that isn't the value of --theme.
+    let theme_val = args
+        .iter()
+        .position(|a| a == "-t" || a == "--theme")
+        .map(|i| i + 1);
+    let arg = match args
+        .iter()
+        .enumerate()
+        .find(|(i, a)| !a.starts_with('-') && Some(*i) != theme_val)
+        .map(|(_, a)| a.clone())
+    {
+        Some(a) => a,
         None => {
             print!("{HELP}");
             bail!("missing argument");
@@ -63,7 +82,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut app = App::new(mode, files, watch);
+    let mut app = App::new(mode, files, watch, &theme);
 
     // Headless render for testing where there's no TTY: GITUI_SNAP=WxH dumps a
     // single frame to stdout and exits.
@@ -75,6 +94,20 @@ fn main() -> Result<()> {
     let res = run(&mut term, &mut app);
     ratatui::restore();
     res
+}
+
+/// Extract the value of `-t` / `--theme` (`--theme x`, `-t x`, or `--theme=x`).
+fn parse_theme(args: &[String]) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if let Some(v) = a.strip_prefix("--theme=") {
+            return Some(v.to_string());
+        }
+        if a == "-t" || a == "--theme" {
+            return it.next().cloned();
+        }
+    }
+    None
 }
 
 fn snapshot(app: &mut App, spec: &str) -> Result<()> {

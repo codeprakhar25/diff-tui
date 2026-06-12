@@ -12,16 +12,47 @@ use syntect::util::LinesWithEndings;
 /// Foreground runs for one line: (start_byte, end_byte, color).
 pub type LineSegs = Vec<(usize, usize, Color)>;
 
+/// Friendly `--theme` names the user can pass, in help-listing order.
+pub const THEMES: &[&str] = &[
+    "ocean",
+    "eighties",
+    "mocha",
+    "ocean-light",
+    "github",
+    "solarized-dark",
+    "solarized-light",
+];
+
+const DEFAULT_THEME: &str = "base16-ocean.dark";
+
+/// Map a friendly name (or a raw syntect key) to a loaded theme.
+fn resolve_theme(ts: &ThemeSet, name: &str) -> Option<Theme> {
+    let key = match name {
+        "ocean" | "dark" => "base16-ocean.dark",
+        "eighties" => "base16-eighties.dark",
+        "mocha" => "base16-mocha.dark",
+        "ocean-light" | "light" => "base16-ocean.light",
+        "github" => "InspiredGitHub",
+        "solarized-dark" => "Solarized (dark)",
+        "solarized-light" => "Solarized (light)",
+        other => other, // allow a raw syntect theme key too
+    };
+    ts.themes.get(key).cloned()
+}
+
 pub struct Highlighter {
     ps: SyntaxSet,
     theme: Theme,
 }
 
 impl Highlighter {
-    pub fn new() -> Self {
+    /// Build a highlighter using the named theme, falling back to the default
+    /// (ocean dark) if the name isn't recognized.
+    pub fn new(theme_name: &str) -> Self {
         let ps = SyntaxSet::load_defaults_newlines();
         let ts = ThemeSet::load_defaults();
-        let theme = ts.themes["base16-ocean.dark"].clone();
+        let theme =
+            resolve_theme(&ts, theme_name).unwrap_or_else(|| ts.themes[DEFAULT_THEME].clone());
         Highlighter { ps, theme }
     }
 
@@ -67,7 +98,7 @@ mod tests {
 
     #[test]
     fn rust_line_gets_multiple_colors() {
-        let h = Highlighter::new();
+        let h = Highlighter::new("ocean");
         let segs = h.file("main.rs", "fn main() { let x = 1; }\n");
         let colors: HashSet<_> = segs[0].iter().map(|&(_, _, c)| c).collect();
         // Keyword/ident/number should not all be one color.

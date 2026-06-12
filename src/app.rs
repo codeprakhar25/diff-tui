@@ -11,6 +11,9 @@ pub enum View {
     Unified, // wired in M5
 }
 
+/// Precomputed syntax segments for a file's old and new sides.
+type SideHl = (Vec<LineSegs>, Vec<LineSegs>);
+
 /// Minimum / maximum left-pane width in split view, as a percentage.
 const SPLIT_MIN: u16 = 20;
 const SPLIT_MAX: u16 = 80;
@@ -25,7 +28,7 @@ pub struct App {
     /// Aligned rows, one Vec per file (parallel to `files`).
     pub rows: Vec<Vec<Row>>,
     /// Per-file syntax segments for the old/new sides (parallel to `files`).
-    pub hl: Vec<(Vec<LineSegs>, Vec<LineSegs>)>,
+    pub hl: Vec<SideHl>,
     /// Highlighter kept alive so watch reloads don't reload syntax defaults.
     hilite: Highlighter,
     /// Whether syntax highlighting is currently applied.
@@ -47,13 +50,15 @@ pub struct App {
 }
 
 /// Build aligned rows + syntax segments for a set of files.
-fn build_views(
-    hilite: &Highlighter,
-    files: &[FileDiff],
-) -> (Vec<Vec<Row>>, Vec<(Vec<LineSegs>, Vec<LineSegs>)>) {
+fn build_views(hilite: &Highlighter, files: &[FileDiff]) -> (Vec<Vec<Row>>, Vec<SideHl>) {
     let rows = files
         .iter()
-        .map(|f| diff::build(f.old.as_deref().unwrap_or(""), f.new.as_deref().unwrap_or("")))
+        .map(|f| {
+            diff::build(
+                f.old.as_deref().unwrap_or(""),
+                f.new.as_deref().unwrap_or(""),
+            )
+        })
         .collect();
     let hl = files
         .iter()
@@ -68,8 +73,8 @@ fn build_views(
 }
 
 impl App {
-    pub fn new(mode: Mode, files: Vec<FileDiff>, watch: bool) -> Self {
-        let hilite = Highlighter::new();
+    pub fn new(mode: Mode, files: Vec<FileDiff>, watch: bool, theme: &str) -> Self {
+        let hilite = Highlighter::new(theme);
         let (rows, hl) = build_views(&hilite, &files);
         App {
             mode,
@@ -158,7 +163,9 @@ impl App {
         if self.files.is_empty() {
             return 0;
         }
-        self.content_len.max(self.rows().len()).saturating_sub(self.viewport_h)
+        self.content_len
+            .max(self.rows().len())
+            .saturating_sub(self.viewport_h)
     }
 
     pub fn scroll_down(&mut self, n: usize) {

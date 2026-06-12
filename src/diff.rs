@@ -40,8 +40,11 @@ fn trim_nl(s: &str) -> String {
     s.to_string()
 }
 
+/// Byte ranges of intra-line changes on one side.
+pub type Ranges = Vec<(usize, usize)>;
+
 /// Changed byte ranges on each side, char-level. Returns (old_ranges, new_ranges).
-fn inline_ranges(a: &str, b: &str) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+fn inline_ranges(a: &str, b: &str) -> (Ranges, Ranges) {
     let diff = TextDiff::from_chars(a, b);
     let (mut ai, mut bi) = (0usize, 0usize);
     let (mut ar, mut br) = (Vec::new(), Vec::new());
@@ -66,12 +69,12 @@ fn inline_ranges(a: &str, b: &str) -> (Vec<(usize, usize)>, Vec<(usize, usize)>)
 }
 
 /// Append (start,end), merging with the previous range if adjacent.
-fn push_range(v: &mut Vec<(usize, usize)>, start: usize, end: usize) {
-    if let Some(last) = v.last_mut() {
-        if last.1 == start {
-            last.1 = end;
-            return;
-        }
+fn push_range(v: &mut Ranges, start: usize, end: usize) {
+    if let Some(last) = v.last_mut()
+        && last.1 == start
+    {
+        last.1 = end;
+        return;
     }
     v.push((start, end));
 }
@@ -141,19 +144,35 @@ pub fn build(old: &str, new: &str) -> Vec<Row> {
                             let rt = nline(ni);
                             let (lr, rr) = inline_ranges(&lt, &rt);
                             rows.push(Row {
-                                left: Some(Cell { num: oi + 1, text: lt, inline: lr }),
-                                right: Some(Cell { num: ni + 1, text: rt, inline: rr }),
+                                left: Some(Cell {
+                                    num: oi + 1,
+                                    text: lt,
+                                    inline: lr,
+                                }),
+                                right: Some(Cell {
+                                    num: ni + 1,
+                                    text: rt,
+                                    inline: rr,
+                                }),
                                 kind: Kind::Changed,
                             });
                         }
                         (Some(oi), None) => rows.push(Row {
-                            left: Some(Cell { num: oi + 1, text: oline(oi), inline: vec![] }),
+                            left: Some(Cell {
+                                num: oi + 1,
+                                text: oline(oi),
+                                inline: vec![],
+                            }),
                             right: None,
                             kind: Kind::Removed,
                         }),
                         (None, Some(ni)) => rows.push(Row {
                             left: None,
-                            right: Some(Cell { num: ni + 1, text: nline(ni), inline: vec![] }),
+                            right: Some(Cell {
+                                num: ni + 1,
+                                text: nline(ni),
+                                inline: vec![],
+                            }),
                             kind: Kind::Added,
                         }),
                         (None, None) => unreachable!(),
