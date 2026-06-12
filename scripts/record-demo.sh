@@ -124,11 +124,26 @@ build_repo
 # Recording and driving are separate: asciinema records a *foreground* `tmux
 # attach`, while a background process feeds keystrokes to the same session.
 export TERM=xterm-256color
+
+# Intro: a clean prompt that "types" `git-ui all` before launching the TUI, so
+# the GIF opens with the command rather than a raw binary path.
+INTRO="$(mktemp)"
+cat >"$INTRO" <<INTROEOF
+#!/usr/bin/env bash
+cd "$DEMO_REPO"
+clear
+sleep 0.5
+printf '\033[36m~/demo\033[0m \033[1;32m❯\033[0m '
+cmd='git-ui all'
+for ((i = 0; i < \${#cmd}; i++)); do printf '%s' "\${cmd:i:1}"; sleep 0.07; done
+sleep 0.6
+printf '\n'
+exec "$BIN" all
+INTROEOF
+chmod +x "$INTRO"
+
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-# Run git-ui directly as the pane command so no shell prompt or typed command
-# appears in the recording — the first frame is the TUI itself.
-tmux -f /dev/null new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" \
-  -c "$DEMO_REPO" "${BIN} all"
+tmux -f /dev/null new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" "bash $INTRO"
 tmux set -g status off
 tmux set -ga terminal-overrides ",xterm-256color:RGB"
 
@@ -136,7 +151,7 @@ tmux set -ga terminal-overrides ",xterm-256color:RGB"
 # attach (and thus asciinema) returns.
 (
   key() { tmux send-keys -t "$SESSION" "$1"; sleep "${2:-0.9}"; }
-  sleep 1.8
+  sleep 3.4   # wait out the intro typing + TUI launch
   key j 0.5; key j 0.5; key j 0.5; key j 1.0   # scroll the diff
   key ] 0.6; key ] 1.2                          # widen the left pane
   key n 1.4                                      # next file (cache.py)
@@ -167,5 +182,5 @@ agg "$CAST_FILE" "$GIF_FILE" \
   --idle-time-limit 2 \
   --last-frame-duration 3
 
-rm -rf "$DEMO_REPO"
+rm -rf "$DEMO_REPO" "$INTRO"
 echo "Wrote ${GIF_FILE}"
