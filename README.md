@@ -40,12 +40,29 @@ markers.
 
 ## Install
 
-Requires a recent [Rust toolchain](https://rustup.rs/) and `git` on your `PATH`.
+### One line (macOS, Linux, WSL)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/codeprakhar25/git-ui/main/install.sh | sh
+```
+
+This downloads the prebuilt binary for your platform from the latest release and
+installs it to `~/.local/bin` (override with `GITUI_BINDIR=/usr/local/bin`). If
+no prebuilt binary matches your platform and `cargo` is present, it falls back to
+building from source. WSL uses the Linux binary.
+
+Prefer `wget`? It's supported too:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/codeprakhar25/git-ui/main/install.sh | sh
+```
 
 ### From source
 
+Requires a recent [Rust toolchain](https://rustup.rs/) and `git` on your `PATH`.
+
 ```sh
-git clone https://github.com/prakhar/git-ui
+git clone https://github.com/codeprakhar25/git-ui
 cd git-ui
 cargo install --path .
 ```
