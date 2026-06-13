@@ -1,6 +1,6 @@
 <div align="center">
 
-# git-ui
+# diff-tui
 
 [![CI](https://github.com/codeprakhar25/git-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/codeprakhar25/git-ui/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/codeprakhar25/git-ui?color=2ea44f)](https://github.com/codeprakhar25/git-ui/releases/latest)
